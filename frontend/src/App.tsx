@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Bold, Italic, Strikethrough, Code, Quote, List, ListOrdered, Link, Image, Table, Eye, EyeOff, Download, Upload, Maximize2, Minimize2, FileText, BookOpen, Save, Settings, Moon, Sun, Palette } from "lucide-react";
+import { Bold, Italic, Strikethrough, Code, Quote, List, ListOrdered, Link, Image, Table, Eye, EyeOff, Download, Upload, Maximize2, Minimize2, FileText, BookOpen, Save, Settings, Moon, Sun, Palette, Plus, X, Menu, Hash, Clock, FileType, RefreshCw, Wand2, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -47,6 +47,20 @@ type Tool = {
   template?: string;
 };
 
+type Document = {
+  id: string;
+  title: string;
+  content: string;
+  created: Date;
+  modified: Date;
+};
+
+type TOCItem = {
+  level: number;
+  text: string;
+  id: string;
+};
+
 const TOOLBAR: Tool[] = [
   { key: "bold", icon: Bold, tip: "粗体 (Ctrl+B)", wrap: ["**", "**"], insert: "加粗文本" },
   { key: "italic", icon: Italic, tip: "斜体 (Ctrl+I)", wrap: ["*", "*"], insert: "斜体文本" },
@@ -64,12 +78,21 @@ const SLASH_COMMANDS = [
   { key: "h1", label: "# 一级标题", snippet: "# 标题\n\n" },
   { key: "h2", label: "## 二级标题", snippet: "## 小节标题\n\n" },
   { key: "h3", label: "### 三级标题", snippet: "### 子标题\n\n" },
-  { key: "todo", label: "✓ 任务列表", snippet: "- [ ] 待办事项 1\n- [x] 已完成事项\n- [ ] 待办事项 2\n\n" },
+  { key: "todo", label: "✅ 任务列表", snippet: "- [ ] 待办事项 1\n- [x] 已完成事项\n- [ ] 待办事项 2\n\n" },
   { key: "note", label: "💡 提示块", snippet: "> **💡 提示**\n> \n> 这里是重要提示内容\n\n" },
   { key: "warn", label: "⚠️ 警告块", snippet: "> **⚠️ 警告**\n> \n> 请注意这里的内容！\n\n" },
   { key: "code", label: "💻 代码块", snippet: "```javascript\n// 在这里输入代码\nconsole.log('Hello World!');\n```\n\n" },
   { key: "table", label: "📊 数据表格", snippet: "| 项目 | 状态 | 备注 |\n|------|------|------|\n| 项目A | 进行中 | 优先级高 |\n| 项目B | 已完成 | 质量良好 |\n\n" },
   { key: "hr", label: "➖ 分割线", snippet: "\n---\n\n" },
+];
+
+const AI_STYLES = [
+  { key: "academic", label: "📚 学术风", description: "严谨、专业、逻辑清晰" },
+  { key: "creative", label: "🎨 创意风", description: "生动、有趣、富有想象力" },
+  { key: "concise", label: "✂️ 简洁风", description: "言简意赅、条理清晰" },
+  { key: "business", label: "💼 商务风", description: "正式、专业、目标导向" },
+  { key: "friendly", label: "😊 友好风", description: "亲和、易懂、贴近生活" },
+  { key: "technical", label: "⚙️ 技术风", description: "准确、详细、逻辑严密" },
 ];
 
 // 主题配置
@@ -116,6 +139,33 @@ function downloadFile(filename: string, content: string, type = "text/plain;char
   URL.revokeObjectURL(url);
 }
 
+function generateId() {
+  return Math.random().toString(36).substr(2, 9);
+}
+
+function extractTOC(markdown: string): TOCItem[] {
+  const lines = markdown.split('\n');
+  const toc: TOCItem[] = [];
+
+  lines.forEach((line) => {
+    const match = line.match(/^(#{1,6})\s+(.+)/);
+    if (match) {
+      const level = match[1].length;
+      const text = match[2].trim();
+      const id = text.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-');
+      toc.push({ level, text, id });
+    }
+  });
+
+  return toc;
+}
+
+function calculateReadingTime(text: string): number {
+  const wordsPerMinute = 200; // 中文约200字/分钟
+  const wordCount = text.length;
+  return Math.ceil(wordCount / wordsPerMinute);
+}
+
 function caretPosition(textarea: HTMLTextAreaElement){
   const { selectionEnd } = textarea;
   const div = document.createElement('div');
@@ -146,14 +196,38 @@ function caretPosition(textarea: HTMLTextAreaElement){
 }
 
 export default function App(){
-  const [title, setTitle] = useState("未命名文档");
-  const [value, setValue] = useState(() => {
+  // 多文档管理
+  const [documents, setDocuments] = useState<Document[]>(() => {
     try {
-      return localStorage.getItem("inkpersona:content") || sample;
+      const saved = localStorage.getItem("inkpersona:documents");
+      if (saved) {
+        const docs = JSON.parse(saved);
+        return docs.map((doc: any) => ({
+          ...doc,
+          created: new Date(doc.created),
+          modified: new Date(doc.modified)
+        }));
+      }
+      return [{
+        id: generateId(),
+        title: "未命名文档",
+        content: sample,
+        created: new Date(),
+        modified: new Date()
+      }];
     } catch {
-      return sample;
+      return [{
+        id: generateId(),
+        title: "未命名文档",
+        content: sample,
+        created: new Date(),
+        modified: new Date()
+      }];
     }
   });
+
+  const [activeDocId, setActiveDocId] = useState(() => documents[0]?.id || '');
+  const activeDoc = documents.find(doc => doc.id === activeDocId) || documents[0];
 
   const [showPreview, setShowPreview] = useState(() => {
     try {
@@ -188,12 +262,17 @@ export default function App(){
     }
   });
 
+  const [showTOC, setShowTOC] = useState(true);
+  const [showDocumentList, setShowDocumentList] = useState(false);
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashPos, setSlashPos] = useState({x:0,y:0});
   const [slashFilter, setSlashFilter] = useState("");
   const [status, setStatus] = useState("已保存");
   const [showSettings, setShowSettings] = useState(false);
   const [wordCount, setWordCount] = useState({ chars: 0, words: 0, lines: 0 });
+  const [showAIPanel, setShowAIPanel] = useState(false);
+  const [selectedText, setSelectedText] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
 
   const textRef = useRef<HTMLTextAreaElement|null>(null);
   const slashRef = useRef<HTMLDivElement|null>(null);
@@ -209,17 +288,17 @@ export default function App(){
   // 保存到本地存储
   useEffect(() => {
     try {
-      localStorage.setItem("inkpersona:content", value);
+      localStorage.setItem("inkpersona:documents", JSON.stringify(documents));
       localStorage.setItem("inkpersona:preview", JSON.stringify(showPreview));
       localStorage.setItem("inkpersona:theme", theme);
       localStorage.setItem("inkpersona:fontSize", String(fontSize));
       localStorage.setItem("inkpersona:lineWidth", String(lineWidth));
-      updateWordCount(value);
+      updateWordCount(activeDoc?.content || '');
       setStatus("已保存");
     } catch (e) {
       console.warn("无法保存到本地存储", e);
     }
-  }, [value, showPreview, theme, fontSize, lineWidth, updateWordCount]);
+  }, [documents, showPreview, theme, fontSize, lineWidth, updateWordCount, activeDoc]);
 
   // 应用主题
   useEffect(() => {
@@ -230,6 +309,11 @@ export default function App(){
       root.style.setProperty(`--${key}`, value);
     });
   }, [theme]);
+
+  // 生成目录
+  const toc = useMemo(() => {
+    return extractTOC(activeDoc?.content || '');
+  }, [activeDoc?.content]);
 
   // 键盘快捷键
   useEffect(() => {
@@ -256,6 +340,11 @@ export default function App(){
         applyToolbar(TOOLBAR.find(t => t.key === 'link')!);
       }
 
+      if (isCtrl && e.key.toLowerCase() === 'e') {
+        e.preventDefault();
+        handleTextSelection();
+      }
+
       if (e.key === '/' && !slashOpen) {
         const ta = textRef.current;
         if (!ta || ta !== document.activeElement) return;
@@ -271,6 +360,7 @@ export default function App(){
       if (e.key === 'Escape') {
         setSlashOpen(false);
         setShowSettings(false);
+        setShowAIPanel(false);
       }
     };
 
@@ -278,7 +368,7 @@ export default function App(){
     return () => window.removeEventListener('keydown', onKey);
   }, [slashOpen]);
 
-  // 点击外部关闭slash菜单
+  // 点击外部关闭菜单
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (slashRef.current && !slashRef.current.contains(e.target as Node)) {
@@ -292,7 +382,7 @@ export default function App(){
     }
   }, [slashOpen]);
 
-  const markdown = useMemo(() => value, [value]);
+  const markdown = useMemo(() => activeDoc?.content || '', [activeDoc?.content]);
 
   const filteredSlashCommands = useMemo(() => {
     if (!slashFilter) return SLASH_COMMANDS;
@@ -301,13 +391,62 @@ export default function App(){
     );
   }, [slashFilter]);
 
+  function updateDocument(id: string, updates: Partial<Document>) {
+    setDocuments(docs => docs.map(doc =>
+      doc.id === id ? { ...doc, ...updates, modified: new Date() } : doc
+    ));
+    setStatus("未保存更改");
+  }
+
+  function updateActiveDocument(content: string) {
+    if (activeDoc) {
+      updateDocument(activeDoc.id, { content });
+    }
+  }
+
+  function createNewDocument() {
+    const newDoc: Document = {
+      id: generateId(),
+      title: "新文档",
+      content: "# 新文档\n\n开始你的写作...\n",
+      created: new Date(),
+      modified: new Date()
+    };
+    setDocuments(docs => [...docs, newDoc]);
+    setActiveDocId(newDoc.id);
+  }
+
+  function deleteDocument(id: string) {
+    if (documents.length <= 1) return;
+
+    setDocuments(docs => docs.filter(doc => doc.id !== id));
+    if (activeDocId === id) {
+      const remaining = documents.filter(doc => doc.id !== id);
+      setActiveDocId(remaining[0]?.id || '');
+    }
+  }
+
+  function duplicateDocument(id: string) {
+    const docToDupe = documents.find(doc => doc.id === id);
+    if (!docToDupe) return;
+
+    const newDoc: Document = {
+      ...docToDupe,
+      id: generateId(),
+      title: docToDupe.title + " (副本)",
+      created: new Date(),
+      modified: new Date()
+    };
+    setDocuments(docs => [...docs, newDoc]);
+  }
+
   function applyToolbar(tool: Tool) {
     const ta = textRef.current;
-    if (!ta) return;
+    if (!ta || !activeDoc) return;
 
     const start = ta.selectionStart || 0;
     const end = ta.selectionEnd || 0;
-    const selected = value.slice(start, end) || tool.insert || "";
+    const selected = activeDoc.content.slice(start, end) || tool.insert || "";
     let replaced = selected;
 
     if (tool.wrap) {
@@ -318,9 +457,8 @@ export default function App(){
       replaced = tool.template;
     }
 
-    const next = value.slice(0, start) + replaced + value.slice(end);
-    setValue(next);
-    setStatus("未保存更改");
+    const next = activeDoc.content.slice(0, start) + replaced + activeDoc.content.slice(end);
+    updateActiveDocument(next);
 
     setTimeout(() => {
       ta.focus();
@@ -331,18 +469,18 @@ export default function App(){
 
   function insertSnippet(snippet: string) {
     const ta = textRef.current;
-    if (!ta) return;
+    if (!ta || !activeDoc) return;
 
     const start = ta.selectionStart || 0;
     const end = ta.selectionEnd || 0;
 
     // 移除开头的 "/"
-    const textBefore = value.slice(0, start);
+    const textBefore = activeDoc.content.slice(0, start);
     const lastSlashIndex = textBefore.lastIndexOf('/');
     const actualStart = lastSlashIndex >= 0 ? lastSlashIndex : start;
 
-    const next = value.slice(0, actualStart) + snippet + value.slice(end);
-    setValue(next);
+    const next = activeDoc.content.slice(0, actualStart) + snippet + activeDoc.content.slice(end);
+    updateActiveDocument(next);
     setSlashOpen(false);
 
     setTimeout(() => {
@@ -352,23 +490,119 @@ export default function App(){
     }, 0);
   }
 
+  function handleTextSelection() {
+    const ta = textRef.current;
+    if (!ta) return;
+
+    const start = ta.selectionStart || 0;
+    const end = ta.selectionEnd || 0;
+    const selected = ta.value.slice(start, end);
+
+    if (selected.trim()) {
+      setSelectedText(selected);
+      setShowAIPanel(true);
+    }
+  }
+
+  async function rewriteText(style: string) {
+    if (!selectedText.trim()) return;
+
+    setAiLoading(true);
+    try {
+      // 修复：使用正确的API地址
+      const response = await fetch('http://localhost:8000/api/rewrite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: selectedText,
+          style: style,
+          instruction: `请按照${AI_STYLES.find(s => s.key === style)?.label}的风格改写这段文字`
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        replaceSelectedText(data.result);
+      } else {
+        // 回退到本地简单改写
+        const enhanced = enhanceTextLocally(selectedText, style);
+        replaceSelectedText(enhanced);
+      }
+    } catch (error) {
+      console.error('AI改写失败:', error);
+      // 回退到本地简单改写
+      const enhanced = enhanceTextLocally(selectedText, style);
+      replaceSelectedText(enhanced);
+    } finally {
+      setAiLoading(false);
+      setShowAIPanel(false);
+    }
+  }
+
+  function enhanceTextLocally(text: string, style: string): string {
+    // 本地简单改写逻辑
+    let result = text.trim();
+
+    switch (style) {
+      case 'concise':
+        result = result.replace(/其实|实际上|事实上/g, '').replace(/有点|一点/g, '略').trim();
+        break;
+      case 'academic':
+        result = result.replace(/我觉得/g, '据观察').replace(/很|非常/g, '十分');
+        break;
+      case 'friendly':
+        result = result.replace(/。/g, '～').replace(/，/g, '，');
+        break;
+    }
+
+    return result;
+  }
+
+  function replaceSelectedText(newText: string) {
+    const ta = textRef.current;
+    if (!ta || !activeDoc) return;
+
+    const start = ta.selectionStart || 0;
+    const end = ta.selectionEnd || 0;
+    const next = activeDoc.content.slice(0, start) + newText + activeDoc.content.slice(end);
+    updateActiveDocument(next);
+
+    setTimeout(() => {
+      ta.focus();
+      ta.setSelectionRange(start, start + newText.length);
+    }, 0);
+  }
+
   function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = () => {
-      setValue(String(reader.result || ""));
-      setTitle(file.name.replace(/\.(md|markdown|txt)$/i, ""));
+      const content = String(reader.result || "");
+      const newDoc: Document = {
+        id: generateId(),
+        title: file.name.replace(/\.(md|markdown|txt)$/i, ""),
+        content,
+        created: new Date(),
+        modified: new Date()
+      };
+      setDocuments(docs => [...docs, newDoc]);
+      setActiveDocId(newDoc.id);
     };
     reader.readAsText(file);
   }
 
   function downloadMD() {
-    downloadFile(`${title || '未命名文档'}.md`, value);
+    if (!activeDoc) return;
+    downloadFile(`${activeDoc.title || '未命名文档'}.md`, activeDoc.content);
   }
 
   function downloadHTML() {
+    if (!activeDoc) return;
+
     const previewElement = document.getElementById('md-preview');
     const htmlContent = previewElement?.innerHTML || "";
     const fullHTML = `<!DOCTYPE html>
@@ -376,7 +610,7 @@ export default function App(){
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${title}</title>
+    <title>${activeDoc.title}</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 40px 20px; color: #333; }
         h1, h2, h3, h4, h5, h6 { margin-top: 24px; margin-bottom: 16px; font-weight: 600; line-height: 1.25; }
@@ -398,109 +632,279 @@ export default function App(){
 ${htmlContent}
 </body>
 </html>`;
-    downloadFile(`${title || '未命名文档'}.html`, fullHTML, 'text/html;charset=utf-8');
+    downloadFile(`${activeDoc.title || '未命名文档'}.html`, fullHTML, 'text/html;charset=utf-8');
+  }
+
+  function downloadPDF() {
+    if (!activeDoc) return;
+
+    // 简单的 PDF 导出提示
+    alert('PDF 导出功能需要服务端支持，请先导出 HTML 然后使用浏览器打印为 PDF');
+  }
+
+  function jumpToHeading(id: string) {
+    const element = document.getElementById(`heading-${id}`);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
+    }
   }
 
   const currentTheme = THEMES[theme as keyof typeof THEMES] || THEMES.light;
+  const readingTime = calculateReadingTime(activeDoc?.content || '');
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: currentTheme.bg,
-      color: currentTheme.fg,
-      transition: 'all 0.3s ease'
-    }}>
+    <div
+      className={zen ? 'zen-mode' : ''}
+      style={{
+        minHeight: '100vh',
+        background: currentTheme.bg,
+        color: currentTheme.fg,
+        transition: 'all 0.3s ease'
+      }}
+    >
       {/* 顶部导航栏 */}
-      <div className="topbar">
-        <div className="container" style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
-            <div style={{
-              width: 32,
-              height: 32,
-              borderRadius: 16,
-              background: 'linear-gradient(135deg, #6366f1, #a855f7)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'white',
-              fontWeight: 'bold',
-              fontSize: 14
-            }}>
-              IP
+      {!zen && (
+        <div className="topbar">
+          <div className="container" style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            maxWidth: '1600px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
+              <div style={{
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+                fontWeight: 'bold',
+                fontSize: 14
+              }}>
+                IP
+              </div>
+
+              <strong style={{
+                fontSize: 18,
+                background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text'
+              }}>
+                InkPersona
+              </strong>
+
+              <button
+                className={`button ${showDocumentList ? 'primary' : ''}`}
+                onClick={() => setShowDocumentList(!showDocumentList)}
+              >
+                <Menu size={16} />
+                文档 ({documents.length})
+              </button>
+
+              <input
+                className="input"
+                value={activeDoc?.title || ''}
+                onChange={e => activeDoc && updateDocument(activeDoc.id, { title: e.target.value })}
+                placeholder="文档标题..."
+                style={{ minWidth: 200 }}
+              />
             </div>
 
-            <strong style={{
-              fontSize: 18,
-              background: 'linear-gradient(135deg, #6366f1, #a855f7)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text'
-            }}>
-              InkPersona
-            </strong>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <button className="button" onClick={createNewDocument}>
+                <Plus size={16} />
+                新建
+              </button>
 
-            <input
-              className="input"
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              placeholder="文档标题..."
-              style={{ minWidth: 200 }}
-            />
-          </div>
+              <label className="button">
+                <Upload size={16} />
+                导入 .md
+                <input
+                  type="file"
+                  accept=".md,.markdown,.txt"
+                  style={{ display: 'none' }}
+                  onChange={onUpload}
+                />
+              </label>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <label className="button">
-              <Upload size={16} />
-              导入 .md
-              <input
-                type="file"
-                accept=".md,.markdown,.txt"
-                style={{ display: 'none' }}
-                onChange={onUpload}
-              />
-            </label>
+              {/* 改进AI改写按钮样式 */}
+              <button
+                className="button ai-button"
+                onClick={handleTextSelection}
+                title="AI 改写选中文本 (Ctrl+E)"
+                style={{
+                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                  color: 'white',
+                  border: 'none',
+                  fontWeight: '500'
+                }}
+              >
+                <Sparkles size={16} />
+                AI 改写
+              </button>
 
-            <button
-              className={`button ${showSettings ? 'primary' : ''}`}
-              onClick={() => setShowSettings(!showSettings)}
-            >
-              <Settings size={16} />
-              设置
-            </button>
+              <button
+                className={`button ${showSettings ? 'primary' : ''}`}
+                onClick={() => setShowSettings(!showSettings)}
+              >
+                <Settings size={16} />
+                设置
+              </button>
 
-            <button
-              className={`button ${zen ? 'primary' : ''}`}
-              onClick={() => setZen(!zen)}
-            >
-              {zen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-              禅模式
-            </button>
+              <button
+                className={`button ${zen ? 'primary' : ''}`}
+                onClick={() => setZen(!zen)}
+              >
+                {zen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                禅模式
+              </button>
 
-            <button
-              className={`button ${showPreview ? 'primary' : ''}`}
-              onClick={() => setShowPreview(!showPreview)}
-            >
-              {showPreview ? <Eye size={16} /> : <EyeOff size={16} />}
-              预览
-            </button>
+              <button
+                className={`button ${showPreview ? 'primary' : ''}`}
+                onClick={() => setShowPreview(!showPreview)}
+              >
+                {showPreview ? <Eye size={16} /> : <EyeOff size={16} />}
+                预览
+              </button>
 
-            <button className="button" onClick={downloadMD}>
-              <Download size={16} />
-              .md
-            </button>
+              <button className="button" onClick={downloadMD}>
+                <Download size={16} />
+                .md
+              </button>
 
-            <button className="button" onClick={downloadHTML}>
-              <Download size={16} />
-              .html
-            </button>
+              <button className="button" onClick={downloadHTML}>
+                <Download size={16} />
+                .html
+              </button>
+
+              <button className="button" onClick={downloadPDF}>
+                <FileType size={16} />
+                PDF
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* 文档列表面板 */}
+      {showDocumentList && (
+        <div className="document-list-panel">
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ margin: 0 }}>文档列表</h3>
+            <button className="button ghost" onClick={() => setShowDocumentList(false)}>
+              <X size={16} />
+            </button>
+          </div>
+          <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+            {documents.map(doc => (
+              <div
+                key={doc.id}
+                className={`document-item ${doc.id === activeDocId ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveDocId(doc.id);
+                  setShowDocumentList(false);
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 500, marginBottom: 4 }}>{doc.title}</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                    {doc.modified.toLocaleDateString()} • {doc.content.length} 字符
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    className="button ghost"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      duplicateDocument(doc.id);
+                    }}
+                    style={{ padding: '4px' }}
+                  >
+                    <FileText size={14} />
+                  </button>
+                  {documents.length > 1 && (
+                    <button
+                      className="button ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm('确定要删除这个文档吗？')) {
+                          deleteDocument(doc.id);
+                        }
+                      }}
+                      style={{ padding: '4px', color: '#ef4444' }}
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* AI 面板 */}
+      {showAIPanel && (
+        <div className="ai-panel">
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Wand2 size={16} />
+              AI 改写助手
+            </h3>
+            <button className="button ghost" onClick={() => setShowAIPanel(false)}>
+              <X size={16} />
+            </button>
+          </div>
+
+          <div style={{ padding: 20 }}>
+            <div style={{ marginBottom: 16, padding: 12, background: 'var(--accent)', borderRadius: 8, fontSize: 14 }}>
+              <strong>选中文本:</strong>
+              <div style={{ marginTop: 8, fontStyle: 'italic' }}>"{selectedText}"</div>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <strong style={{ marginBottom: 8, display: 'block' }}>选择改写风格:</strong>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {AI_STYLES.map(style => (
+                  <button
+                    key={style.key}
+                    className="ai-style-button"
+                    onClick={() => rewriteText(style.key)}
+                    disabled={aiLoading}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: 12,
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      background: 'var(--cardBg)',
+                      cursor: aiLoading ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.2s ease',
+                      opacity: aiLoading ? 0.6 : 1
+                    }}
+                  >
+                    <span>{style.label}</span>
+                    <span style={{ fontSize: 12, color: 'var(--muted)', flex: 1, textAlign: 'left' }}>
+                      {style.description}
+                    </span>
+                    {aiLoading && <RefreshCw size={14} className="spin" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center' }}>
+              快捷键: Ctrl/Cmd + E 快速选择文本进行改写
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 设置面板 */}
       {showSettings && (
@@ -549,110 +953,215 @@ ${htmlContent}
               style={{ width: '100%' }}
             />
           </div>
+
+          <div className="setting-group">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={showTOC}
+                onChange={e => setShowTOC(e.target.checked)}
+              />
+              显示目录导航
+            </label>
+          </div>
         </div>
       )}
 
-      <div className="container" style={{ paddingTop: 12 }}>
-        <div className="card" style={{ padding: zen ? 0 : 20 }}>
-          {/* 工具栏 */}
-          {!zen && (
-            <div className="toolbar">
-              {TOOLBAR.map(t => (
-                <button
-                  key={t.key}
-                  className="button"
-                  title={t.tip}
-                  onClick={() => applyToolbar(t)}
-                >
-                  {React.createElement(t.icon, { size: 16 })}
-                </button>
-              ))}
-              <span className="badge">输入 "/" 打开插入菜单</span>
-            </div>
-          )}
-
-          {/* Slash 命令菜单 */}
-          {slashOpen && (
-            <div
-              ref={slashRef}
-              className="slash-menu"
-              style={{
-                position: 'fixed',
-                left: slashPos.x,
-                top: slashPos.y,
-                zIndex: 1000
-              }}
-            >
-              {filteredSlashCommands.map(cmd => (
-                <div
-                  key={cmd.key}
-                  className="slash-item"
-                  onClick={() => insertSnippet(cmd.snippet)}
-                >
-                  {cmd.label}
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className={showPreview ? "row split" : "row"}>
-            <div>
-              <textarea
-                ref={textRef}
-                className="textarea"
-                style={{
-                  fontSize: fontSize,
-                  lineHeight: 1.6,
-                  height: zen ? 'calc(100vh - 80px)' : '62vh'
-                }}
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                placeholder="# 从这里开始写作..."
-              />
-              <div className="editor-stats">
-                <span><Save size={14}/> {status}</span>
-                <span><FileText size={14}/> {wordCount.chars} 字符</span>
-                <span><BookOpen size={14}/> {wordCount.words} 词</span>
+      <div className="container" style={{ paddingTop: zen ? 0 : 12, maxWidth: '1600px' }}>
+        <div className={zen ? "main-layout zen" : "main-layout"}>
+          {/* 侧边目录 */}
+          {showTOC && toc.length > 0 && !zen && (
+            <div className="toc-sidebar">
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 14 }}>
+                <Hash size={16} style={{ display: 'inline', marginRight: 6 }} />
+                目录导航
+              </div>
+              <div style={{ padding: '8px 0', maxHeight: '60vh', overflowY: 'auto' }}>
+                {toc.map((item, index) => (
+                  <div
+                    key={index}
+                    className="toc-item"
+                    style={{
+                      paddingLeft: 16 + (item.level - 1) * 16,
+                      paddingRight: 16,
+                      paddingTop: 6,
+                      paddingBottom: 6,
+                      cursor: 'pointer',
+                      fontSize: 14 - (item.level - 1),
+                      color: item.level === 1 ? 'var(--fg)' : 'var(--muted)',
+                      borderLeft: item.level === 1 ? '3px solid var(--primary)' : 'none',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onClick={() => jumpToHeading(item.id)}
+                  >
+                    {item.text}
+                  </div>
+                ))}
               </div>
             </div>
+          )}
 
-            {showPreview && <div className="divider"></div>}
-
-            {showPreview && (
-              <div>
-                <div className="preview-header">
-                  <div>预览</div>
-                  <div>宽度 {Math.round(lineWidth)}px</div>
+          {/* 主编辑区域 */}
+          <div className="editor-area" style={{ flex: 1, minHeight: zen ? '100vh' : 'calc(100vh - 200px)' }}>
+            <div className="card" style={{
+              padding: zen ? 20 : 20,
+              border: zen ? 'none' : undefined,
+              boxShadow: zen ? 'none' : undefined,
+              background: zen ? 'transparent' : undefined,
+              minHeight: zen ? '100vh' : 'auto'
+            }}>
+              {/* 工具栏 */}
+              {!zen && (
+                <div className="toolbar">
+                  {TOOLBAR.map(t => (
+                    <button
+                      key={t.key}
+                      className="button"
+                      title={t.tip}
+                      onClick={() => applyToolbar(t)}
+                    >
+                      {React.createElement(t.icon, { size: 16 })}
+                    </button>
+                  ))}
+                  <div style={{ flex: 1 }}></div>
+                  <span className="badge">输入 "/" 打开插入菜单</span>
                 </div>
+              )}
+
+              {/* Slash 命令菜单 */}
+              {slashOpen && (
                 <div
-                  id="md-preview"
-                  className="prose"
+                  ref={slashRef}
+                  className="slash-menu"
                   style={{
-                    border: '1px solid var(--border)',
-                    borderRadius: 12,
-                    padding: 20,
-                    overflow: 'auto',
-                    width: lineWidth,
-                    maxHeight: zen ? 'calc(100vh - 120px)' : '62vh'
+                    position: 'fixed',
+                    left: slashPos.x,
+                    top: slashPos.y,
+                    zIndex: 1000
                   }}
                 >
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    rehypePlugins={[rehypeRaw, rehypeHighlight]}
-                  >
-                    {markdown}
-                  </ReactMarkdown>
+                  {filteredSlashCommands.map(cmd => (
+                    <div
+                      key={cmd.key}
+                      className="slash-item"
+                      onClick={() => insertSnippet(cmd.snippet)}
+                    >
+                      {cmd.label}
+                    </div>
+                  ))}
                 </div>
+              )}
+
+              {/* 编辑器布局 - 修复为确保固定高度 */}
+              <div className={showPreview && !zen ? "editor-layout split" : "editor-layout"}>
+                <div className="editor-section" style={{ minHeight: zen ? 'calc(100vh - 100px)' : '60vh' }}>
+                  <textarea
+                    ref={textRef}
+                    className="textarea"
+                    style={{
+                      fontSize: fontSize,
+                      lineHeight: 1.6,
+                      height: zen ? 'calc(100vh - 100px)' : '60vh',
+                      width: '100%',
+                      minHeight: zen ? 'calc(100vh - 100px)' : '60vh',
+                      background: zen ? 'transparent' : undefined,
+                      border: zen ? 'none' : undefined,
+                      outline: zen ? 'none' : undefined
+                    }}
+                    value={activeDoc?.content || ''}
+                    onChange={(e) => updateActiveDocument(e.target.value)}
+                    onSelect={e => {
+                      const target = e.target as HTMLTextAreaElement;
+                      const selected = target.value.slice(target.selectionStart, target.selectionEnd);
+                      if (selected.trim()) {
+                        setSelectedText(selected);
+                      }
+                    }}
+                    placeholder="# 从这里开始写作..."
+                  />
+                  {!zen && (
+                    <div className="editor-stats">
+                      <span><Save size={14}/> {status}</span>
+                      <span><FileText size={14}/> {wordCount.chars} 字符</span>
+                      <span><BookOpen size={14}/> {wordCount.words} 词</span>
+                      <span><Clock size={14}/> 约 {readingTime} 分钟阅读</span>
+                    </div>
+                  )}
+                </div>
+
+                {showPreview && !zen && <div className="divider"></div>}
+
+                {showPreview && !zen && (
+                  <div className="preview-section" style={{ minHeight: '60vh' }}>
+                    <div className="preview-header">
+                      <div>预览</div>
+                      <div>宽度 {Math.round(lineWidth)}px</div>
+                    </div>
+                    <div
+                      id="md-preview"
+                      className="prose"
+                      style={{
+                        border: '1px solid var(--border)',
+                        borderRadius: 12,
+                        padding: 20,
+                        overflow: 'auto',
+                        width: '100%',
+                        maxWidth: lineWidth,
+                        height: '60vh',
+                        minHeight: '60vh'
+                      }}
+                    >
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        rehypePlugins={[rehypeRaw, rehypeHighlight]}
+                        components={{
+                          h1: ({node, children, ...props}) => (
+                            <h1 id={`heading-${children?.toString().toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')}`} {...props}>
+                              {children}
+                            </h1>
+                          ),
+                          h2: ({node, children, ...props}) => (
+                            <h2 id={`heading-${children?.toString().toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')}`} {...props}>
+                              {children}
+                            </h2>
+                          ),
+                          h3: ({node, children, ...props}) => (
+                            <h3 id={`heading-${children?.toString().toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')}`} {...props}>
+                              {children}
+                            </h3>
+                          ),
+                          h4: ({node, children, ...props}) => (
+                            <h4 id={`heading-${children?.toString().toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')}`} {...props}>
+                              {children}
+                            </h4>
+                          ),
+                          h5: ({node, children, ...props}) => (
+                            <h5 id={`heading-${children?.toString().toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')}`} {...props}>
+                              {children}
+                            </h5>
+                          ),
+                          h6: ({node, children, ...props}) => (
+                            <h6 id={`heading-${children?.toString().toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-')}`} {...props}>
+                              {children}
+                            </h6>
+                          ),
+                        }}
+                      >
+                        {markdown}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
         </div>
       </div>
 
       {!zen && (
         <div className="footer">
-          <div>快捷键：Ctrl/Cmd+S 保存、Ctrl/Cmd+B 加粗、Ctrl/Cmd+I 斜体、Ctrl/Cmd+K 链接、/ 打开插入菜单</div>
-          <div>本地自动保存 • 无打扰写作</div>
+          <div>快捷键：Ctrl/Cmd+S 保存、Ctrl/Cmd+B 加粗、Ctrl/Cmd+I 斜体、Ctrl/Cmd+K 链接、Ctrl/Cmd+E AI改写、/ 打开插入菜单</div>
+          <div>本地自动保存 • 无打扰写作 • {documents.length} 个文档</div>
         </div>
       )}
     </div>
