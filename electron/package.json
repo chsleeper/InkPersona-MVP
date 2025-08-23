@@ -1,0 +1,32 @@
+{
+  "name": "inkpersona-electron",
+  "version": "0.1.0",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "dev": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.6.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.inkpersona.editor",
+    "productName": "InkPersona",
+    "files": [
+      "../frontend/dist/**",
+      "main.js",
+      "preload.js"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  }
+}
