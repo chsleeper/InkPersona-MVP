@@ -230,7 +230,10 @@
         gap: 16px;
         width: 100%;
         flex: 1;
-        min-height: 60vh;
+        min-height: 80vh !important;
+        height: 80vh !important;
+        max-height: 80vh !important;
+        box-sizing: border-box;
       }
 
       .editor-layout.split {
@@ -240,15 +243,29 @@
       .editor-section, .preview-section {
         min-width: 0;
         overflow: hidden;
-        min-height: 60vh;
+        min-height: 80vh !important;
+        height: 80vh !important;
+        max-height: 80vh !important;
         display: flex;
         flex-direction: column;
+        box-sizing: border-box;
       }
 
       .editor-section .textarea {
-        height: 60vh;
-        min-height: 60vh;
-        max-height: 60vh;
+        height: 80vh !important;
+        min-height: 80vh !important;
+        max-height: 80vh !important;
+        flex: 1;
+        box-sizing: border-box;
+      }
+
+      .preview-section .prose {
+        height: 80vh !important;
+        min-height: 80vh !important;
+        max-height: 80vh !important;
+        overflow-y: auto;
+        flex: 1;
+        box-sizing: border-box;
       }
 
       .divider {
