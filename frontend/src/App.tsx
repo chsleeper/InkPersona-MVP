@@ -1623,215 +1623,229 @@ graph LR
   const downloadWord = useCallback(() => {
     if (!activeDoc) return;
 
-    // 创建完整的HTML文档用于Word导出
-    const currentTheme = THEMES[theme as keyof typeof THEMES] || THEMES.light;
+    try {
+      let processedContent = activeDoc.content;
 
-    // 处理Markdown内容转换为HTML
-    let processedContent = activeDoc.content;
+      // 处理Markdown内容为Word兼容的HTML格式
+      processedContent = processedContent
+        // 处理代码块 - 使用Word兼容的格式
+        .replace(/```[\s\S]*?```/g, (match) => {
+          const code = match.replace(/```\w*\n?/, '').replace(/```$/, '');
+          return `<div style="margin: 12pt 0; padding: 8pt; background: #f5f5f5; border: 1pt solid #d9d9d9; font-family: 'Courier New', monospace; font-size: 10pt; line-height: 1.2; white-space: pre-wrap; word-wrap: break-word;">${code}</div>`;
+        })
+        // 处理行内代码
+        .replace(/`([^`]+)`/g, '<span style="background: #f0f0f0; padding: 1pt 2pt; border: 1pt solid #ddd; font-family: "Courier New", monospace; font-size: 10pt;">$1</span>')
+        // 处理标题 - 使用Word标准字体和大小
+        .replace(/^# (.*$)/gim, '<h1 style="font-family: "Microsoft YaHei", "SimSun", serif; font-size: 16pt; font-weight: bold; margin: 24pt 0 12pt 0; color: #2c3e50; page-break-after: avoid;">$1</h1>')
+        .replace(/^## (.*$)/gim, '<h2 style="font-family: "Microsoft YaHei", "SimSun", serif; font-size: 14pt; font-weight: bold; margin: 20pt 0 10pt 0; color: #34495e; page-break-after: avoid;">$1</h2>')
+        .replace(/^### (.*$)/gim, '<h3 style="font-family: "Microsoft YaHei", "SimSun", serif; font-size: 12pt; font-weight: bold; margin: 16pt 0 8pt 0; color: #34495e; page-break-after: avoid;">$1</h3>')
+        .replace(/^#### (.*$)/gim, '<h4 style="font-family: "Microsoft YaHei", "SimSun", serif; font-size: 11pt; font-weight: bold; margin: 12pt 0 6pt 0; color: #34495e; page-break-after: avoid;">$1</h4>')
+        // 处理文本格式
+        .replace(/\*\*(.*?)\*\*/g, '<strong style="font-weight: bold;">$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em style="font-style: italic;">$1</em>')
+        // 处理引用 - Word兼容格式
+        .replace(/^> (.*$)/gm, '<blockquote style="margin: 12pt 0 12pt 36pt; padding: 0; border-left: 3pt solid #3498db; font-style: italic; color: #7f8c8d;">$1</blockquote>')
+        // 处理无序列表
+        .replace(/^- (.*$)/gm, '<p style="margin: 6pt 0; font-family: "Microsoft YaHei", "SimSun", serif; font-size: 11pt; margin-left: 36pt; text-indent: -18pt;">• $1</p>')
+        // 处理有序列表
+        .replace(/^\d+\. (.*$)/gm, (match, content, offset, string) => {
+          const number = match.match(/^\d+/)[0];
+          return `<p style="margin: 6pt 0; font-family: "Microsoft YaHei", "SimSun", serif; font-size: 11pt; margin-left: 36pt; text-indent: -18pt;">${number}. ${content}</p>`;
+        })
+        // 处理表格 - Word兼容格式
+        .replace(/\|(.+?)\|/g, (match) => {
+          const cells = match.slice(1, -1).split('|').map(c => c.trim()).filter(c => c && !c.includes('---'));
+          if (cells.length === 0) return '';
+          let tableHTML = '<table style="border-collapse: collapse; width: 100%; margin: 12pt 0; font-family: "Microsoft YaHei", "SimSun", serif; font-size: 11pt;"><tr>';
+          cells.forEach(cell => {
+            tableHTML += `<td style="border: 1pt solid #d9d9d9; padding: 6pt; font-family: "Microsoft YaHei", "SimSun", serif; font-size: 11pt;">${cell}</td>`;
+          });
+          tableHTML += '</tr></table>';
+          return tableHTML;
+        })
+        // 处理图片 - Word兼容格式
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<div style="text-align: center; margin: 12pt 0;"><img alt="$1" src="$2" style="max-width: 400px; height: auto;" /></div>')
+        // 处理链接
+        .replace(/\[([^\]]*)\]\(([^)]+)\)/g, '<a href="$2" style="color: #3498db; text-decoration: underline;">$1</a>')
+        // 处理普通段落
+        .replace(/\n\n/g, '</p><p style="font-family: "Microsoft YaHei", "SimSun", serif; font-size: 11pt; line-height: 1.5; margin: 6pt 0;">')
+        .replace(/^(.+)$/gm, '<p style="font-family: "Microsoft YaHei", "SimSun", serif; font-size: 11pt; line-height: 1.5; margin: 6pt 0;">$1</p>');
 
-    // 处理标题
-    processedContent = processedContent
-      .replace(/^#### (.*$)/gim, '<h4 style="margin: 14px 0 8px 0; font-size: 1.1em; font-weight: 600;">$1</h4>')
-      .replace(/^### (.*$)/gim, '<h3 style="margin: 16px 0 8px 0; font-size: 1.25em; font-weight: 600;">$1</h3>')
-      .replace(/^## (.*$)/gim, '<h2 style="margin: 20px 0 12px 0; font-size: 1.5em; font-weight: 600;">$1</h2>')
-      .replace(/^# (.*$)/gim, '<h1 style="margin: 24px 0 16px 0; font-size: 2em; font-weight: 700;">$1</h1>');
-
-    // 处理文本格式
-    processedContent = processedContent
-      .replace(/\*\*(.*?)\*\*/g, '<strong style="font-weight: bold;">$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em style="font-style: italic;">$1</em>')
-      .replace(/`([^`]+)`/g, '<code style="background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em;">$1</code>')
-      .replace(/```([\s\S]*?)```/g, '<pre style="background: #f3f4f6; padding: 16px; border-radius: 8px; overflow-x: auto; font-family: monospace; font-size: 14px; margin: 16px 0;"><code>$1</code></pre>');
-
-    // 处理引用
-    processedContent = processedContent
-      .replace(/^> (.*$)/gm, '<blockquote style="border-left: 4px solid #3b82f6; margin: 16px 0; padding: 0 20px; color: #6b7280; font-style: italic;">$1</blockquote>');
-
-    // 处理列表
-    processedContent = processedContent
-      .replace(/^- (.*$)/gm, '<li style="margin: 4px 0; margin-left: 20px;">$1</li>')
-      .replace(/^\d+\. (.*$)/gm, '<li style="margin: 4px 0; margin-left: 20px;">$1</li>');
-
-    // 处理段落
-    processedContent = processedContent
-      .replace(/\n\n/g, '</p><p style="margin: 12px 0;">')
-      .replace(/^(.+)$/gm, '<p style="margin: 12px 0; line-height: 1.6;">$1</p>');
-
-    // 处理图片
-    processedContent = processedContent
-      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" style="max-width: 100%; height: auto; border-radius: 8px; margin: 16px 0;" />');
-
-    // 处理链接
-    processedContent = processedContent
-      .replace(/\[([^\]]*)\]\(([^)]+)\)/g, '<a href="$2" style="color: #3b82f6; text-decoration: none;">$1</a>');
-
-    // 处理表格
-    processedContent = processedContent
-      .replace(/\|(.+?)\|/g, (match) => {
-        const cells = match.slice(1, -1).split('|').map(c => c.trim());
-        let tableHTML = '<table style="border-collapse: collapse; width: 100%; margin: 16px 0; border: 1px solid #d1d5db;"><tr>';
-        cells.forEach(cell => {
-          if (cell && !cell.includes('---')) {
-            tableHTML += `<td style="border: 1px solid #d1d5db; padding: 8px;">${cell}</td>`;
-          }
-        });
-        tableHTML += '</tr></table>';
-        return tableHTML;
-      });
-
-    // 创建Word文档的HTML格式
-    const wordHTML = `<!DOCTYPE html>
-<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+      // 创建Word兼容的HTML文档
+      const wordHTML = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${activeDoc.title || '未命名文档'}</title>
-    <!--[if gte mso 9]>
-    <xml>
-        <w:WordDocument>
-            <w:View>Print</w:View>
-            <w:Zoom>100</w:Zoom>
-            <w:DoNotOptimizeForBrowser/>
-        </w:WordDocument>
-    </xml>
-    <![endif]-->
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-            line-height: 1.6;
-            color: #374151;
-            background: #ffffff;
-            margin: 0;
-            padding: 20px;
-        }
-        h1, h2, h3, h4, h5, h6 {
-            margin-top: 24px;
-            margin-bottom: 16px;
-            font-weight: 600;
-            line-height: 1.25;
-            color: #111827;
-        }
-        h1 { font-size: 2em; border-bottom: 2px solid #3b82f6; padding-bottom: 8px; }
-        h2 { font-size: 1.5em; color: #3b82f6; }
-        h3 { font-size: 1.25em; }
-        h4 { font-size: 1.1em; }
-        p { margin-bottom: 16px; line-height: 1.7; }
-        pre {
-            background: #f9fafb;
-            padding: 16px;
-            border-radius: 8px;
-            overflow-x: auto;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 14px;
-            margin: 16px 0;
-            border-left: 4px solid #3b82f6;
-            page-break-inside: avoid;
-        }
-        code {
-            background: #f3f4f6;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 0.9em;
-        }
-        blockquote {
-            border-left: 4px solid #3b82f6;
-            margin: 16px 0;
-            padding: 0 20px;
-            color: #6b7280;
-            font-style: italic;
-            page-break-inside: avoid;
-        }
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            margin: 16px 0;
-            border: 1px solid #d1d5db;
-            page-break-inside: avoid;
-        }
-        th, td {
-            border: 1px solid #d1d5db;
-            padding: 12px;
-            text-align: left;
-        }
-        th {
-            background: #f9fafb;
-            font-weight: 600;
-        }
-        img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 8px;
-            margin: 16px 0;
-            page-break-inside: avoid;
-        }
-        a {
-            color: #3b82f6;
-            text-decoration: none;
-        }
-        ul, ol {
-            margin: 16px 0;
-            padding-left: 40px;
-        }
-        li {
-            margin: 8px 0;
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 40px;
-            border-bottom: 2px solid #d1d5db;
-            padding-bottom: 20px;
-        }
-        .title {
-            font-size: 2.5em;
-            font-weight: 700;
-            margin-bottom: 8px;
-            color: #111827;
-        }
-        .subtitle {
-            font-size: 1.2em;
-            color: #6b7280;
-            margin-bottom: 16px;
-        }
-        .meta {
-            font-size: 0.9em;
-            color: #6b7280;
-        }
-        @media print {
-            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            .pdf-container { padding: 0; }
-        }
-    </style>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word 15">
+<meta name="Originator" content="Microsoft Word 15">
+<!--[if gte mso 9]>
+<xml>
+<w:WordDocument>
+<w:View>Print</w:View>
+<w:Zoom>100</w:Zoom>
+<w:DoNotOptimizeForBrowser/>
+<w:Compatibility>
+<w:BreakWrappedTables/>
+<w:SnapToGridInCell/>
+<w:WrapTextWithPunct/>
+<w:UseAsianBreakRules/>
+<w:DontGrowAutofit/>
+<w:SplitPgBreakAndParaMark/>
+<w:EnableOpenTypeKerning/>
+</w:Compatibility>
+</w:WordDocument>
+</xml>
+<![endif]-->
+<style>
+<!--
+/* Font Definitions */
+@font-face
+{font-family:"Microsoft YaHei";
+panose-1:2 11 5 3 2 2 4 2 2 4;
+mso-font-charset:134;
+mso-generic-font-family:swiss;
+mso-font-pitch:variable;
+mso-font-signature:-520081665 -2147483648 41 0 262144 0;}
+@font-face
+{font-family:"SimSun";
+panose-1:2 1 6 0 3 1 1 1 1 1;
+mso-font-charset:134;
+mso-generic-font-family:auto;
+mso-font-pitch:variable;
+mso-font-signature:3 680460288 22 0 262145 0;}
+/* Style Definitions */
+p.MsoNormal, li.MsoNormal, div.MsoNormal
+{mso-style-unhide:no;
+mso-style-qformat:yes;
+mso-style-parent:"";
+margin:0cm;
+margin-bottom:.0001pt;
+text-align:justify;
+text-justify:inter-ideograph;
+mso-pagination:widow-orphan;
+font-size:11.0pt;
+font-family:"Microsoft YaHei",sans-serif;
+mso-ascii-font-family:"Microsoft YaHei";
+mso-hansi-font-family:"Microsoft YaHei";
+mso-bidi-font-family:"Microsoft YaHei";}
+h1
+{mso-style-priority:9;
+mso-style-unhide:no;
+mso-style-qformat:yes;
+mso-style-link:"标题 1 字符";
+mso-style-next:正文;
+margin-top:24.0pt;
+margin-right:0cm;
+margin-bottom:12.0pt;
+margin-left:0cm;
+text-align:justify;
+text-justify:inter-ideograph;
+mso-pagination:widow-orphan;
+page-break-after:avoid;
+mso-outline-level:1;
+font-size:16.0pt;
+font-family:"Microsoft YaHei",sans-serif;
+mso-ascii-font-family:"Microsoft YaHei";
+mso-hansi-font-family:"Microsoft YaHei";
+mso-bidi-font-family:"Microsoft YaHei";
+font-weight:bold;}
+h2
+{mso-style-priority:9;
+mso-style-unhide:no;
+mso-style-qformat:yes;
+mso-style-link:"标题 2 字符";
+mso-style-next:正文;
+margin-top:20.0pt;
+margin-right:0cm;
+margin-bottom:10.0pt;
+margin-left:0cm;
+text-align:justify;
+text-justify:inter-ideograph;
+mso-pagination:widow-orphan;
+page-break-after:avoid;
+mso-outline-level:2;
+font-size:14.0pt;
+font-family:"Microsoft YaHei",sans-serif;
+mso-ascii-font-family:"Microsoft YaHei";
+mso-hansi-font-family:"Microsoft YaHei";
+mso-bidi-font-family:"Microsoft YaHei";
+font-weight:bold;}
+h3
+{mso-style-priority:9;
+mso-style-unhide:no;
+mso-style-qformat:yes;
+mso-style-link:"标题 3 字符";
+mso-style-next:正文;
+margin-top:16.0pt;
+margin-right:0cm;
+margin-bottom:8.0pt;
+margin-left:0cm;
+text-align:justify;
+text-justify:inter-ideograph;
+mso-pagination:widow-orphan;
+page-break-after:avoid;
+mso-outline-level:3;
+font-size:12.0pt;
+font-family:"Microsoft YaHei",sans-serif;
+mso-ascii-font-family:"Microsoft YaHei";
+mso-hansi-font-family:"Microsoft YaHei";
+mso-bidi-font-family:"Microsoft YaHei";
+font-weight:bold;}
+h4
+{mso-style-priority:9;
+mso-style-unhide:no;
+mso-style-qformat:yes;
+mso-style-link:"标题 4 字符";
+mso-style-next:正文;
+margin-top:12.0pt;
+margin-right:0cm;
+margin-bottom:6.0pt;
+margin-left:0cm;
+text-align:justify;
+text-justify:inter-ideograph;
+mso-pagination:widow-orphan;
+page-break-after:avoid;
+mso-outline-level:4;
+font-size:11.0pt;
+font-family:"Microsoft YaHei",sans-serif;
+mso-ascii-font-family:"Microsoft YaHei";
+mso-hansi-font-family:"Microsoft YaHei";
+mso-bidi-font-family:"Microsoft YaHei";
+font-weight:bold;}
+-->
+</style>
 </head>
-<body>
-    <div class="word-container">
-        <div class="header">
-            <div class="title">${activeDoc.title || '未命名文档'}</div>
-            <div class="subtitle">InkPersona 文档导出</div>
-            <div class="meta">导出时间：${new Date().toLocaleString('zh-CN')}</div>
-        </div>
-        ${processedContent}
-    </div>
+<body lang="ZH-CN" style="tab-interval:21.0pt;word-wrap:break-word">
+<div class="WordSection1">
+<p style="text-align:center; margin:0cm; margin-bottom:.0001pt; font-family:"Microsoft YaHei",sans-serif; font-size:16.0pt; font-weight:bold; color:#2c3e50;">${activeDoc.title || '未命名文档'}</p>
+<p style="text-align:center; margin:0cm; margin-bottom:.0001pt; font-family:"Microsoft YaHei",sans-serif; font-size:10.0pt; color:#7f8c8d;">导出时间：${new Date().toLocaleString('zh-CN')}</p>
+<p style="margin:0cm; margin-bottom:.0001pt;">&nbsp;</p>
+${processedContent}
+</div>
 </body>
 </html>`;
 
-    // 创建Blob对象
-    const blob = new Blob([wordHTML], {
-      type: 'application/msword;charset=utf-8'
-    });
+      // 创建Blob对象，使用正确的MIME类型
+      const blob = new Blob([wordHTML], {
+        type: 'application/msword'
+      });
 
-    // 创建下载链接
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${activeDoc.title || '未命名文档'}.doc`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+      // 创建下载链接
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${activeDoc.title || '未命名文档'}.doc`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
 
-    showNotification('success', 'Word文档已下载');
-  }, [activeDoc, theme, showNotification]);
+      showNotification('success', 'Word文档已下载');
+    } catch (error) {
+      console.error('Word导出失败:', error);
+      showNotification('error', 'Word导出失败，请重试');
+    }
+  }, [activeDoc, showNotification]);
 
   const downloadPDF = useCallback(() => {
     if (!activeDoc) return;
@@ -2621,7 +2635,7 @@ graph LR
                 onClick={downloadWord}
               >
                 <FileText size={16} />
-                .docx
+                .doc
               </button>
               <button
                 style={{
