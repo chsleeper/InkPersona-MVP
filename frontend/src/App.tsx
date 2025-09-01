@@ -1209,33 +1209,416 @@ graph LR
   const downloadHTML = useCallback(() => {
     if (!activeDoc) return;
 
-    const htmlContent = activeDoc.content
+    // 获取当前主题
+    const currentTheme = THEMES[theme as keyof typeof THEMES] || THEMES.light;
+
+    // 处理Markdown内容转换为HTML，包含完整的格式支持
+    let processedContent = activeDoc.content;
+
+    // 处理代码块
+    processedContent = processedContent
+      .replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
+        const language = lang || 'plaintext';
+        return `<pre><code class="language-${language}">${escapeHtml(code.trim())}</code></pre>`;
+      })
+      .replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // 处理标题
+    processedContent = processedContent
+      .replace(/^#### (.*$)/gim, '<h4>$1</h4>')
       .replace(/^### (.*$)/gim, '<h3>$1</h3>')
       .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-      .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-      .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
-      .replace(/\*(.*)\*/gim, '<em>$1</em>')
-      .replace(/\n/gim, '<br />');
+      .replace(/^# (.*$)/gim, '<h1>$1</h1>');
 
+    // 处理文本格式
+    processedContent = processedContent
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/~~(.*?)~~/g, '<del>$1</del>');
+
+    // 处理引用
+    processedContent = processedContent
+      .replace(/^> (.*$)/gm, '<blockquote>$1</blockquote>');
+
+    // 处理列表
+    processedContent = processedContent
+      .replace(/^(\s*)- (.*$)/gm, '$1<li>$2</li>')
+      .replace(/^(\s*)\d+\. (.*$)/gm, '$1<li>$2</li>');
+
+    // 处理列表容器
+    processedContent = processedContent
+      .replace(/(<li>.*<\/li>\n?)+/g, (match) => {
+        if (match.includes('</li>')) {
+          return `<ul>${match}</ul>`;
+        }
+        return match;
+      });
+
+    // 处理图片
+    processedContent = processedContent
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" />');
+
+    // 处理链接
+    processedContent = processedContent
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
+    // 处理表格
+    processedContent = processedContent
+      .replace(/\n\|(.+)\|\n\|[-:\| ]+\|\n((\|.+\|\n)+)/g, (match, header, rows) => {
+        const headers = header.split('|').map(h => h.trim()).filter(h => h);
+        const tableRows = rows.trim().split('\n').map(row => {
+          const cells = row.split('|').map(c => c.trim()).filter(c => c);
+          return '<tr>' + cells.map(cell => `<td>${cell}</td>`).join('') + '</tr>';
+        }).join('');
+        
+        return `<table>
+          <thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+          <tbody>${tableRows}</tbody>
+        </table>`;
+      });
+
+    // 处理段落
+    processedContent = processedContent
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/^([^<\n].*[^>])$/gm, '<p>$1</p>');
+
+    // 清理多余的标签
+    processedContent = processedContent
+      .replace(/<\/p><p><\/p><p>/g, '</p><p>')
+      .replace(/<p><pre>/g, '<pre>')
+      .replace(/<\/pre><\/p>/g, '</pre>');
+
+    // 创建完整的HTML文档
     const fullHTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${activeDoc.title}</title>
+    <title>${activeDoc.title || '未命名文档'}</title>
+    <meta name="description" content="由 InkPersona 导出的HTML文档">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 40px 20px; color: #333; }
-        h1, h2, h3 { margin-top: 24px; margin-bottom: 16px; font-weight: 600; }
-        p { margin-bottom: 16px; }
+        :root {
+            --bg: ${currentTheme.bg};
+            --fg: ${currentTheme.fg};
+            --muted: ${currentTheme.muted};
+            --border: ${currentTheme.border};
+            --cardBg: ${currentTheme.cardBg};
+            --primary: ${currentTheme.primary};
+            --accent: ${currentTheme.accent};
+            --shadow: ${currentTheme.shadow};
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            line-height: 1.7;
+            color: var(--fg);
+            background: var(--bg);
+            margin: 0;
+            padding: 60px 20px;
+            max-width: 900px;
+            margin: 0 auto;
+            min-height: 100vh;
+        }
+
+        /* 标题样式 */
+        h1, h2, h3, h4, h5, h6 {
+            margin: 2em 0 1em 0;
+            font-weight: 600;
+            line-height: 1.3;
+            color: var(--fg);
+        }
+
+        h1 { font-size: 2.5em; border-bottom: 2px solid var(--border); padding-bottom: 0.3em; }
+        h2 { font-size: 2em; color: var(--primary); }
+        h3 { font-size: 1.5em; }
+        h4 { font-size: 1.25em; }
+        h5 { font-size: 1.1em; }
+        h6 { font-size: 1em; }
+
+        /* 段落样式 */
+        p {
+            margin: 1em 0;
+            line-height: 1.8;
+        }
+
+        /* 代码样式 */
+        code {
+            background: var(--accent);
+            padding: 0.2em 0.4em;
+            border-radius: 4px;
+            font-family: 'SFMono-Regular', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
+            font-size: 0.9em;
+            color: var(--fg);
+        }
+
+        pre {
+            background: var(--accent);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5em;
+            overflow-x: auto;
+            margin: 1.5em 0;
+            font-family: 'SFMono-Regular', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
+            line-height: 1.4;
+        }
+
+        pre code {
+            background: none;
+            padding: 0;
+            font-size: 0.9em;
+            color: var(--fg);
+        }
+
+        /* 引用样式 */
+        blockquote {
+            margin: 1.5em 0;
+            padding: 1em 1.5em;
+            border-left: 4px solid var(--primary);
+            background: var(--accent);
+            color: var(--muted);
+            font-style: italic;
+        }
+
+        /* 列表样式 */
+        ul, ol {
+            margin: 1em 0;
+            padding-left: 2em;
+        }
+
+        li {
+            margin: 0.5em 0;
+            line-height: 1.6;
+        }
+
+        /* 链接样式 */
+        a {
+            color: var(--primary);
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: border-color 0.2s ease;
+        }
+
+        a:hover {
+            border-bottom-color: var(--primary);
+        }
+
+        /* 强调样式 */
+        strong {
+            font-weight: 600;
+            color: var(--fg);
+        }
+
+        em {
+            font-style: italic;
+            color: var(--muted);
+        }
+
+        del {
+            text-decoration: line-through;
+            color: var(--muted);
+        }
+
+        /* 表格样式 */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1.5em 0;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 0.75em;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--accent);
+            font-weight: 600;
+            color: var(--fg);
+        }
+
+        tr:hover {
+            background: var(--accent);
+        }
+
+        /* 图片样式 */
+        img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            margin: 1.5em 0;
+            box-shadow: 0 2px 8px var(--shadow);
+        }
+
+        /* 水平线 */
+        hr {
+            border: none;
+            height: 1px;
+            background: var(--border);
+            margin: 2em 0;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            body {
+                padding: 40px 16px;
+                font-size: 16px;
+            }
+            
+            h1 { font-size: 2em; }
+            h2 { font-size: 1.75em; }
+            h3 { font-size: 1.5em; }
+            
+            pre {
+                padding: 1em;
+                font-size: 14px;
+            }
+        }
+
+        /* 打印样式 */
+        @media print {
+            body {
+                background: white;
+                color: black;
+                font-size: 12pt;
+                line-height: 1.5;
+            }
+            
+            h1, h2, h3 {
+                page-break-after: avoid;
+            }
+            
+            pre, blockquote, table {
+                page-break-inside: avoid;
+            }
+            
+            a {
+                color: black;
+                text-decoration: underline;
+            }
+        }
+
+        /* 代码高亮样式 */
+        .hljs {
+            display: block;
+            overflow-x: auto;
+            padding: 0.5em;
+            color: var(--fg);
+            background: var(--accent);
+        }
+
+        .hljs-comment,
+        .hljs-quote {
+            color: var(--muted);
+            font-style: italic;
+        }
+
+        .hljs-keyword,
+        .hljs-selector-tag,
+        .hljs-subst {
+            color: #d73a49;
+            font-weight: bold;
+        }
+
+        .hljs-string,
+        .hljs-doctag {
+            color: #032f62;
+        }
+
+        .hljs-number,
+        .hljs-literal,
+        .hljs-variable,
+        .hljs-template-variable,
+        .hljs-tag .hljs-attr {
+            color: #005cc5;
+        }
+
+        .hljs-title,
+        .hljs-section,
+        .hljs-selector-id {
+            color: #6f42c1;
+        }
+
+        .hljs-subst {
+            font-weight: normal;
+        }
+
+        .hljs-type,
+        .hljs-class .hljs-title {
+            color: #d73a49;
+            font-weight: bold;
+        }
+
+        .hljs-tag,
+        .hljs-name,
+        .hljs-attribute {
+            color: #000080;
+            font-weight: normal;
+        }
+
+        .hljs-regexp,
+        .hljs-link {
+            color: #009926;
+        }
+
+        .hljs-symbol,
+        .hljs-bullet {
+            color: #990073;
+        }
+
+        .hljs-built_in,
+        .hljs-builtin-name {
+            color: #0086b3;
+        }
+
+        .hljs-meta {
+            color: #999;
+            font-weight: bold;
+        }
+
+        .hljs-deletion {
+            background: #fdd;
+        }
+
+        .hljs-addition {
+            background: #dfd;
+        }
+
+        .hljs-emphasis {
+            font-style: italic;
+        }
+
+        .hljs-strong {
+            font-weight: bold;
+        }
     </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
 </head>
 <body>
-${htmlContent}
+    <article>
+        <header>
+            <h1>${activeDoc.title || '未命名文档'}</h1>
+            <p style="color: var(--muted); font-size: 0.9em; margin-bottom: 2em;">
+                导出时间: ${new Date().toLocaleString('zh-CN')}
+            </p>
+        </header>
+        ${processedContent}
+    </article>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script>hljs.highlightAll();</script>
 </body>
 </html>`;
+    
     downloadFile(`${activeDoc.title || '未命名文档'}.html`, fullHTML, 'text/html;charset=utf-8');
     showNotification('success', 'HTML文件已下载');
-  }, [activeDoc, showNotification]);
+  }, [activeDoc, theme, showNotification]);
 
   const downloadWord = useCallback(() => {
     if (!activeDoc) return;
